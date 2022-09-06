@@ -1,10 +1,15 @@
-from logging import exception
+import csv
 import traceback
 import requests
 from urllib.parse import urlencode
 
+csv_columns = ['ano', 'entrada', 'num_vo', 'nome', 'sexo', 'data de nasc', 'idade', 'nome da mãe', 'endereço', 'lat', 'long', 'dist', 'municipio ', 'area resid', 'CEP', 'ocupação ', 'escolaridade', 'Data do óbito', 'H do óbito', 'unidade de atendimento', 'tipo de caso', 'tratamento anterior', 'Forma clínica 1', 'Forma clínica 2', 'Forma clínica 3', 'classificação', 'tipo de descoberta', 'baciloscopia escarro', 'baciloscopia outro material',
+               'cultura escarro', 'cultura outro mataterial', 'RXtoráx', 'Anti-HIV', 'necrópsia ', 'outros exames', 'tratamento', 'tratamento inicial', 'tratamento atual', 'comunicantes total', 'comunicantes examinados', 'comunicantes adoeceram', 'total de internações', 'data de encerramento do caso', 'conclusão do caso', 'tuberculose pulmonar', 'tuberculose ganglionar', 'tuberculose cerebral', 'tuberculose miliar disseminada', 'outros órgãos']
+
 
 def find_geocode(address):
+    latlng = {}
+    lat, lng = '', ''
     endpoint = f"https://maps.googleapis.com/maps/api/geocode/json"
     params = {
         "key": api_key,
@@ -16,15 +21,16 @@ def find_geocode(address):
     if r.status_code not in range(200, 299):
         print(f"⚠️ Error! Status Code: {r.status_code}:\n{r.json()}")
         return {}
-    latlng = {}
     try:
         latlng = r.json()['results'][0]['geometry']['location']
+        lat = latlng.get("lat")
+        lng = latlng.get("lng")
     except:
-        print(f'⚠️Exception: {r.json()}')
+        print(f'⚠️ Exception: {r.json()}')
         traceback.print_exc()
     finally:
         print(f'📍 Input address ({address}) found geocode {latlng}')
-        return latlng.get("lat"), latlng.get("lng")
+    return lat, lng
 
 
 def find_place(input, lat='-23.533773', lng='-46.625290'):
@@ -34,13 +40,11 @@ def find_place(input, lat='-23.533773', lng='-46.625290'):
         "key": api_key,
         "input": input,
         "inputtype": "textquery",
-        # "fields": "formatted_address,name,geometry,permanently_closed",
         "fields": "name,place_id",
         "locationbias": locationbias
     }
     url_params = urlencode(params)
     url = f"{endpoint}?{url_params}"
-    # print(f'DEBUG: findplace calling url: {url}\n')
     r = requests.get(url)
     if r.status_code not in range(200, 299):
         print(f"⚠️ Error! Status Code: {r.status_code}:\n{r.json()}")
@@ -51,13 +55,14 @@ def find_place(input, lat='-23.533773', lng='-46.625290'):
     except:
         print(f'⚠️ Exception:\n{r.json()}')
         traceback.print_exc()
-        pass
+        return None
     finally:
         print(f'🗺️ find_place() found: {place_name}')
         return place_id
 
 
-def find_distance(orig, dest):
+def find_distance_from_points(orig, dest):
+    distance = -1
     endpoint = f"https://maps.googleapis.com/maps/api/distancematrix/json"
     params = {
         "origins": orig,
@@ -76,29 +81,56 @@ def find_distance(orig, dest):
     except:
         print(f'⚠️ Exception: {r.json()}')
         traceback.print_exc()
-        distance = -1
-        pass
     finally:
-        print(
-            f'🏃find_distance() found: {distance} meters')
+        print(f'find_distance: [Origin: {orig}]-[Destination:{dest}]')
+        print(f'🏃find_distance() found: {distance} meters.')
     return distance
 
 
-def main(api_key, address):
+def get_distance(user_addr):
+    print(f'\nInitiating Operation for address:({user_addr})')
+    user_lat, user_lng = find_geocode(user_addr)
+    unit_place_id = find_place("UBS", user_lat, user_lng)
+    distance = find_distance_from_points(
+        f'place_id:{unit_place_id}',
+        f'{user_lat},{user_lng}'
+    )
+    return distance
+
+
+def save_to_csv(data):
+    with open('out.csv', mode='w', encoding='utf-8') as outfile:
+        writer = csv.DictWriter(outfile, fieldnames=csv_columns)
+        writer.writeheader()
+        for d in data:
+            writer.writerow(d)
+        return
+
+
+def read_from_csv(file):
+    patient_list = []
+    with open(file, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for line in reader:
+            patient_list.append(line)
+    return patient_list
+
+
+def main(api_key):
     api_key = api_key
 
-    user_addr = address
-    print(f'\nInitiating main() for address:({address})')
-    user_lat, user_lng = find_geocode(user_addr)
-    # print(f'DEBUG| find_geocode() returned: {user_lat}, {user_lng}')
-    unit_place_id = find_place("UBS", user_lat, user_lng)
-    # unit_place_id = find_place("UBS", user_addr)
-    # print(f'DEBUG| find_place() returned: {unit_place_id}')
-    user_origin = f'{user_lat},{user_lng}'
-    # user_origin = f'{user_addr}'
-    distance = find_distance(f'place_id:{unit_place_id}', user_origin)
-    # print(f'DEBUG| find_distance() returned: {distance}m')
-    return
+    data = read_from_csv('tb.csv')
+    for n, row in enumerate(data):
+        user_addr = row['endereço']
+        user_dist = -1
+        if (user_addr.upper() != 'IGNORADO') & (user_addr.upper() != 'MORADOR DE RUA') & (user_addr.upper() != 'SEM INFORMAÇÃO'):
+            user_dist = get_distance(user_addr)
+        else:
+            continue
+        print(f'#{n+1}/{len(data)}: Setting dist to {user_dist}')
+        data[n]['dist'] = (user_dist)
+
+    save_to_csv(data)
 
 
 if __name__ == "__main__":
@@ -110,12 +142,4 @@ if __name__ == "__main__":
         print("⚠️ API Key required!")
     else:
         print("\nAPI Key loaded!\nNow calling main()...\n")
-        addresses = [
-            'Av Paulista, 900',
-            'Av Brigadeiro Faria Lima 500',
-            'Av José Pinheiro Borges 6500',
-            'R Virgílio Gonçalves Leite 400',
-            'R Aristídes Belini 400'
-        ]
-    for address in addresses:
-        main(api_key, address)
+        main(api_key)
