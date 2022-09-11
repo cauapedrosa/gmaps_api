@@ -5,6 +5,13 @@ from urllib.parse import urlencode
 
 csv_columns = ['ano', 'entrada', 'num_vo', 'nome', 'sexo', 'data de nasc', 'idade', 'nome da mãe', 'endereço', 'lat', 'long', 'dist', 'municipio ', 'area resid', 'CEP', 'ocupação ', 'escolaridade', 'Data do óbito', 'H do óbito', 'unidade de atendimento', 'tipo de caso', 'tratamento anterior', 'Forma clínica 1', 'Forma clínica 2', 'Forma clínica 3', 'classificação', 'tipo de descoberta', 'baciloscopia escarro', 'baciloscopia outro material',
                'cultura escarro', 'cultura outro mataterial', 'RXtoráx', 'Anti-HIV', 'necrópsia ', 'outros exames', 'tratamento', 'tratamento inicial', 'tratamento atual', 'comunicantes total', 'comunicantes examinados', 'comunicantes adoeceram', 'total de internações', 'data de encerramento do caso', 'conclusão do caso', 'tuberculose pulmonar', 'tuberculose ganglionar', 'tuberculose cerebral', 'tuberculose miliar disseminada', 'outros órgãos']
+search_term_list = ["UBS", "AMA", "CTA", "UPA", "SAE", "CRST", "URSI", "PS Municipal"]
+
+# Import API Key from "api-key.txt"
+api_file = open("api-key.txt", "r")
+api_key = api_file.read()
+api_file.close()
+print(f'\n👍 Loaded Api Key! {api_key[:5]}...')
 
 
 def find_geocode(address):
@@ -87,10 +94,10 @@ def find_distance_from_points(orig, dest):
     return distance
 
 
-def get_distance(user_addr):
+def get_distance(user_addr, search_term):
     print(f'\nInitiating Operation for address:({user_addr})')
     user_lat, user_lng = find_geocode(user_addr)
-    unit_place_id = find_place("UBS", user_lat, user_lng)
+    unit_place_id = find_place(search_term, user_lat, user_lng)
     distance = find_distance_from_points(
         f'place_id:{unit_place_id}',
         f'{user_lat},{user_lng}'
@@ -102,8 +109,7 @@ def save_to_csv(data):
     with open('out.csv', mode='w', encoding='utf-8') as outfile:
         writer = csv.DictWriter(outfile, fieldnames=csv_columns)
         writer.writeheader()
-        for d in data:
-            writer.writerow(d)
+        writer.writerows(data)
         return
 
 
@@ -120,24 +126,28 @@ def main(api_key):
     api_key = api_key
 
     data = read_from_csv('tb.csv')
-    for n, row in enumerate(data):
-        user_addr = row['endereço']
+    for n, user in enumerate(data):
+        user_dist_shortest = 99999
         user_dist = -1
+        user_addr = user['endereço']
         if (user_addr.upper() != 'IGNORADO') & (user_addr.upper() != 'MORADOR DE RUA') & (user_addr.upper() != 'SEM INFORMAÇÃO'):
-            user_dist = get_distance(user_addr)
+            for i, search_term in enumerate(search_term_list):
+                print(f'#{i+1}/{len(search_term_list)} Searching for {search_term} near {user_addr}')
+                user_dist = get_distance(user_addr, search_term)
+                print(f'DEBUG: Found distance ({user_dist}). Comparing to shortest ({user_dist_shortest})')
+                if user_dist <= user_dist_shortest:
+                    print(f'DEBUG: Found shorter distance. user: {user_dist} | shortest: {user_dist_shortest}')
+                    user_dist_shortest = user_dist
         else:
-            continue
-        print(f'#{n+1}/{len(data)}: Setting dist to {user_dist}')
+            print(f"Address [{user_addr}] is invalid, skipping...")
+        print(f'✅{n+1}/{len(data)}: Shorter distance found was {user_dist_shortest}. Saving to dict...')
         data[n]['dist'] = (user_dist)
 
     save_to_csv(data)
 
 
 if __name__ == "__main__":
-    # Import API Key from "api-key.txt"
-    api_file = open("api-key.txt", "r")
-    api_key = api_file.read()
-    api_file.close()
+
     if api_key == None:
         print("⚠️ API Key required!")
     else:
